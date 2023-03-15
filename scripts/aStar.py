@@ -7,15 +7,23 @@ from nav_msgs.msg import OccupancyGrid
 from sensor_msgs.msg import Image
 import tf
 import time
+from scipy import ndimage
 
 import numpy as np
 import matplotlib.pyplot as plt
 
 grid_size = (0, 0)
-yaw_thresh = 1
+yaw_thresh = 3
 turtle_pos = (-1,-1,-1)
 turtle_rot = (-1,-1,-1,-1)
 resolution = 0.05
+astar_node_path = np.array(np.array([]))
+goalx = 0.0
+goaly = 0.0
+map2d = np.array([])
+dialatedmap=np.array([])
+
+
 
 
 # Handles Turtlebot odometery
@@ -23,6 +31,7 @@ class Turtlebot:
     def __init__(self):
         self.odom_sub = rospy.Subscriber('/odom', Odometry, self.odom_callback)
         self.cmd_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
+        self.dilatedmap_pub = rospy.Publisher('/dilated_map', OccupancyGrid, queue_size=10)
         self.pos = np.array([])
         self.ort = Quaternion()
         self.start_pos = None
@@ -32,11 +41,6 @@ class Turtlebot:
         self.ort = data.pose.pose.orientation
 
 turtle_bot = Turtlebot()
-
-astar_node_path = np.array(np.array([]))
-goalx = -1.0
-goaly = -1.0
-map2d = np.array([])
 
 # # Map grid given in the assignment
 # #     -9 -8 -7 -6 -5 -4 -3 -2 -1 | 1  2  3  4  5  6  7  8  9
@@ -94,10 +98,31 @@ def map_callback(grid):
     grid_size = [height,width]
     resolution = grid.info.resolution
 
-    map2d = np.array(data).reshape((height, width)).T
-    
-    print = "occupancygrid shape: {}".format(map2d.shape)
-    rospy.loginfo(print)
+    raw_map = np.array(data).reshape((height, width))
+    raw_map = np.flip(raw_map, axis=1)
+    # rospy.loginfo("unique values: {}".format(np.unique(map2d)))
+    # mask = np.where(raw_map > 0.2)
+    # for i in range(len(mask[0])):
+    #     raw_map[mask[0][i]][mask[1][i]] = 1
+    mask = np.where(raw_map < 0.0)
+    for i in range(len(mask[0])):
+        raw_map[mask[0][i]][mask[1][i]] = 0
+    printstr = "occupancygrid shape: {}".format(map2d.shape)
+    struct2= np.ones((3,3))
+    dialatedmap= ndimage.binary_dilation(raw_map,structure=struct2).astype(raw_map.dtype)
+    dialatedmap=np.flip(dialatedmap, axis=1)
+    printstr = "dialatedmap: {}".format(dialatedmap.shape)
+    rospy.loginfo(printstr)
+    printstr = "unique values: {}".format(np.unique(raw_map))
+    rospy.loginfo(printstr)
+    map2d=dialatedmap
+    mask = np.where(dialatedmap == 1)
+    for i in range(len(mask[0])):
+        dialatedmap[mask[0][i]][mask[1][i]] = 100
+    # Compensating for y-axis being inverted
+    dilmap = grid
+    dilmap.data = tuple(dialatedmap.flatten())
+    turtle_bot.dilatedmap_pub.publish(dilmap)
 
 
 # Shifts the bots postion to center of the grid tile - improves visually
@@ -107,7 +132,7 @@ def center_offset(vec):
     else:
         offset_x = -0.5
     if vec[1] < 0:
-        offset_y = 0.2
+        offset_y = 0.5
     else:
         offset_y = -0.5
     return np.array([vec[0] + offset_x, vec[1] + offset_y])
@@ -206,7 +231,7 @@ def astar_pathfinder(bot_pos_in_node, goal_pos_in_node):
                 continue
             if neighbor_node in closed_nodes:
                 continue
-            if map2d[int(round(neighbor_node.pos[0])), int(round((grid_size[0] - 1) - neighbor_node.pos[1]))] == 1:
+            if map2d[int(round(neighbor_node.pos[0])), int(round((grid_size[0] - 1) - neighbor_node.pos[1]))] == 100:
                 if index < 4:
                     st_path_blocked[index] = True
                 continue
@@ -254,7 +279,7 @@ def plot_path_to_gui(astar_node_path,map2d,turtle_pos,goal_pos):
     
     # Path Visualization
     plt.cla()
-    plt.plot(np.where(map2d == 0)[0]-200, np.where(map2d == 0)[1]-200, marker='.', color='blue', linestyle="")
+    # plt.plot(np.where(map2d == 0)[0]-200, np.where(map2d == 0)[1]-200, marker='.', color='blue', linestyle="")
     plt.plot(np.where(map2d == 1)[0]-200, np.where(map2d == 1)[1]-200, marker='s', color='black', linestyle="")
     # plt.plot(astar_node_path[:, 0], astar_node_path[:, 1], marker='o', color='red')
     plt.plot(astar_world_path[:, 0], astar_world_path[:, 1], marker='o', color='red')
@@ -263,10 +288,10 @@ def plot_path_to_gui(astar_node_path,map2d,turtle_pos,goal_pos):
     plt.title("Plotting turtlebot")
     plt.show(block=False)
     plt.pause(0.1)
-    # plt.close("all")
+    #plt.close("all")
     rospy.loginfo("Initiating Path Execution.")
 
-def init():
+def init(dilated_map_pub):
     # global new_path
     global astar_node_path
     global turtle_world_listener
@@ -276,7 +301,7 @@ def init():
     current_node = 0
     world_path = list()
 
-    current_goal_dist = 0.5
+    current_goal_dist = 0.05/resolution
 
     goal_pos = world_pos_to_node(np.array([round(goalx/resolution + 0.01), round(goaly/resolution)]))
 
@@ -284,6 +309,7 @@ def init():
 
     # Main Loop
     while not rospy.is_shutdown():
+        world_path.clear()
         try:
             (turtle_pos,turtle_rot) = turtle_world_listener.lookupTransform('/map','/base_footprint',rospy.Time(0))
             printstr = "turtle_pos: [{},{}]".format(turtle_pos[0],turtle_pos[1])
@@ -293,34 +319,57 @@ def init():
             astar_node_path = astar_pathfinder(start_pos, goal_pos)
             astar_node_path = np.vstack((start_pos, astar_node_path))
             for node in astar_node_path:
-                world_path.append(tuple(center_offset(node_to_world_pos(node))))
-            plot_path_to_gui(astar_node_path,map2d,turtle_pos,goal_pos)
+                # world_path.append(tuple(center_offset(node_to_world_pos(node))))
+                world_path.append(tuple(node_to_world_pos(node)))
+            # plot_path_to_gui(astar_node_path,map2d,turtle_pos,goal_pos)
         except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
             rospy.logerr("Error fetching /base_footprint /map tf")
+            continue
+        except ValueError:
+            rospy.logerr("astar_node_path is empty!")
             continue
         # if turtle_bot.pos.shape[0] <= 0:
         #     continue
         
+        turtle_pos = [turtle_pos[0]/resolution,turtle_pos[1]/resolution]
+       
         # Handles bot turning and movement according to goal node
-        local_goal = np.array(world_path[current_node])
+        try:
+            local_goal = np.array(world_path[current_node])
+        except IndexError:
+            rospy.logerr("IndexError, current_node counter too large. Exiting.")
+            twist_msg = Twist()
+            twist_msg.angular.z = 0.0
+            twist_msg.linear.x = 0.0
+            turtle_bot.cmd_pub.publish(twist_msg)
+            rate.sleep()
+            break
         printstr = "turtle_bot.pos: {},turtle_pos: {}".format(turtle_bot.pos,[turtle_pos[0], turtle_pos[1]])
         rospy.loginfo(printstr)
-        distance = np.linalg.norm(turtle_bot.pos - local_goal)
+        distance = np.linalg.norm(turtle_pos - local_goal)
         # distance = np.linalg.norm(turtle_bot.pos - local_goal)
-        goal_yaw = np.arctan2(turtle_bot.pos[1] - local_goal[1], turtle_bot.pos[0] - local_goal[0])
+        goal_yaw = np.arctan2(turtle_pos[1] - local_goal[1], turtle_pos[0] - local_goal[0])+np.pi
+        # goal_yaw = np.arctan2(local_goal[1] - turtle_pos[1], local_goal[0] - turtle_pos[0])+np.pi
         bot_yaw = tf.transformations.euler_from_quaternion((turtle_bot.ort.x,
                                                             turtle_bot.ort.y,
                                                             turtle_bot.ort.z,
                                                             turtle_bot.ort.w))[2]
         rel_yaw = np.arctan2(np.sin(goal_yaw - bot_yaw), np.cos(goal_yaw - bot_yaw))
-        rel_yaw = rel_yaw + np.pi
-        if rel_yaw > np.pi:
-            rel_yaw = np.abs(np.pi - rel_yaw) - np.pi
+        # rel_yaw = rel_yaw + np.pi
+        # if rel_yaw > np.pi:
+        #     rel_yaw = np.abs(np.pi - rel_yaw) - np.pi
 
         if distance < current_goal_dist and current_node == len(world_path) - 1:
             rospy.loginfo("Path Execution complete")
+            twist_msg = Twist()
+            twist_msg.angular.z = 0.0
+            twist_msg.linear.x = 0.0
+            turtle_bot.cmd_pub.publish(twist_msg)
+            rate.sleep()
             break
-        if distance < current_goal_dist and current_node < len(world_path) - 1:
+        while distance < current_goal_dist and current_node < len(world_path) - 2:
+            local_goal = np.array(world_path[current_node])
+            distance = np.linalg.norm(turtle_pos - local_goal)
             current_node += 1
         twist_msg = Twist()
         yaw_kp = np.min([np.abs(rel_yaw), 2]) / 2
@@ -328,14 +377,28 @@ def init():
         dist_kp = np.min([distance, 0.5]) / 0.5
         # else:
         #     dist_kp = 1
+        # printstr = "world_path: {}".format(world_path)
+        # rospy.logerr(printstr)
+        # printstr = "rel_yaw: {}".format(np.rad2deg(rel_yaw))
+        # rospy.logerr(printstr)
+        # printstr = "goal_yaw: {}".format(np.rad2deg(goal_yaw))
+        # rospy.logerr(printstr)
+        # printstr = "bot_yaw: {}".format(np.rad2deg(bot_yaw))
+        # rospy.logerr(printstr)
+        # printstr = "local_goal: {}".format(local_goal)
+        # rospy.logerr(printstr)
+        # printstr = "turtle_pos: {}".format(turtle_pos)
+        # rospy.logerr(printstr)
         if rel_yaw < -np.deg2rad(yaw_thresh) and distance > current_goal_dist:
-            twist_msg.angular.z = -10 * yaw_kp
+            twist_msg.angular.z = -3 * yaw_kp
 
         elif rel_yaw > np.deg2rad(yaw_thresh) and distance > current_goal_dist:
-            twist_msg.angular.z = 10 * yaw_kp
+            twist_msg.angular.z = 3 * yaw_kp
 
-        elif distance > current_goal_dist:
-            twist_msg.linear.x = 2.0 * dist_kp
+        if distance > current_goal_dist and rel_yaw < np.deg2rad(yaw_thresh)*3:
+            printstr = "dist_kp: {}, linear.x: {}".format(dist_kp,0.1*dist_kp)
+            rospy.logerr(printstr)
+            twist_msg.linear.x = 0.2 * dist_kp
         else:
             twist_msg.linear.x = 0.0
         turtle_bot.cmd_pub.publish(twist_msg)
@@ -347,6 +410,7 @@ if __name__ == '__main__':
     turtle_world_listener = tf.TransformListener()
     
     map_sub = rospy.Subscriber('/map', OccupancyGrid, map_callback)
+    dilated_map_pub = rospy.Publisher('/dilated_map', OccupancyGrid, queue_size=10)
 
     first_odom = rospy.wait_for_message("/odom", Odometry)
     first_map = rospy.wait_for_message("/map",OccupancyGrid)
@@ -354,4 +418,4 @@ if __name__ == '__main__':
     
 
     # Start main loop
-    init()
+    init(dilated_map_pub)
