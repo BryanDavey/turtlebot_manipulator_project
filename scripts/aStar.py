@@ -15,6 +15,7 @@ grid_size = (0, 0)
 yaw_thresh = 1
 turtle_pos = (-1,-1,-1)
 turtle_rot = (-1,-1,-1,-1)
+resolution = 0.05
 
 
 # Handles Turtlebot odometery
@@ -33,8 +34,8 @@ class Turtlebot:
 turtle_bot = Turtlebot()
 
 astar_node_path = np.array(np.array([]))
-goalx = 4.5
-goaly = 9.0
+goalx = -1.0
+goaly = -1.0
 map2d = np.array([])
 
 # # Map grid given in the assignment
@@ -85,48 +86,18 @@ def map_callback(grid):
     global turtle_pos
     global turtle_rot
     global grid_size
+    global resolution
 
     data = grid.data
     height = grid.info.height
     width = grid.info.width
     grid_size = [height,width]
+    resolution = grid.info.resolution
 
     map2d = np.array(data).reshape((height, width)).T
     
     print = "occupancygrid shape: {}".format(map2d.shape)
     rospy.loginfo(print)
-
-# PLOT PATH TO GUI
-    # Compensating for y-axis being inverted
-    # map2d = np.flip(map2d, axis=1)
-
-    astar_world_path = []
-    print_astar_node_path = []
-    for node in astar_node_path:
-        print_astar_node_path.append(tuple(node))
-        astar_world_path.append(tuple(center_offset(node_to_world_pos(node))))
-    rospy.loginfo(f"\nA-star Node Path:\n {print_astar_node_path}")
-    rospy.loginfo(f"\nA-star World Path:\n {astar_world_path}")
-    # map_for_print = map2d
-    # for i, j in astar_node_path:
-    #     i = int(round(i))
-    #     j = int(round(j))
-    #     map_for_print[i, (grid_size[0] - 1) - j] = 5
-    # map_for_print = np.flip(map2d.T, axis=0)
-    # string_map = str(map_for_print).replace(' [', '').replace('[', '').replace(']', '').replace('0', ' ').replace('5', '*')
-    # rospy.loginfo(f"\nMap:\n{string_map}")
-    #
-    #
-    # # Path Visualization
-    # plt.plot(np.where(map2d == 0)[0]-200, np.where(map2d == 0)[1]-200, marker='.', color='blue', linestyle="")
-    # plt.plot(np.where(map2d == 1)[0]-200, np.where(map2d == 1)[1]-200, marker='s', color='black', linestyle="")
-    # plt.plot(astar_node_path[:, 0], (grid_size[0] - 1) - astar_node_path[:, 1], marker='o', color='red')
-    # plt.title("This window will close after 3 seconds")
-    # plt.show(block=False)
-    # plt.pause(3)
-    # plt.close("all")
-    rospy.loginfo("Initiating Path Execution.")
-# END PLOT PATH TO GUI
 
 
 # Shifts the bots postion to center of the grid tile - improves visually
@@ -178,7 +149,7 @@ def astar_pathfinder(bot_pos_in_node, goal_pos_in_node):
     e = 5
     open_nodes: list = []
     closed_nodes: list = []
-    # rospy.loginfo(f"bot_node: {bot_pos_in_node}, goal_node: {goal_pos_in_node}")
+    rospy.loginfo(f"bot_node: {bot_pos_in_node}, goal_node: {goal_pos_in_node}")
     bot_node = Node()
     bot_node.pos = bot_pos_in_node
     bot_node.pos[0] = int(round(bot_node.pos[0]))
@@ -256,7 +227,8 @@ def astar_pathfinder(bot_pos_in_node, goal_pos_in_node):
             if neighbor_node not in open_nodes:
                 open_nodes.append(neighbor_node)
 
-def plot_path_to_gui(astar_node_path,map2d,turtle_pos):
+def plot_path_to_gui(astar_node_path,map2d,turtle_pos,goal_pos):
+    global resolution
     
     # Compensating for y-axis being inverted
     # map2d = np.flip(map2d, axis=1)
@@ -265,9 +237,11 @@ def plot_path_to_gui(astar_node_path,map2d,turtle_pos):
     print_astar_node_path = []
     for node in astar_node_path:
         print_astar_node_path.append(tuple(node))
-        astar_world_path.append(tuple(center_offset(node_to_world_pos(node))))
-    rospy.loginfo(f"\nA-star Node Path:\n {print_astar_node_path}")
-    rospy.loginfo(f"\nA-star World Path:\n {astar_world_path}")
+        # astar_world_path.append(tuple(center_offset(node_to_world_pos(node))))
+        astar_world_path.append(center_offset(node_to_world_pos(node)))
+    astar_world_path = np.array(astar_world_path)
+    # rospy.loginfo(f"\nA-star Node Path:\n {print_astar_node_path}")
+    # rospy.loginfo(f"\nA-star World Path:\n {astar_world_path}")
     # map_for_print = map2d
     # for i, j in astar_node_path:
     #     i = int(round(i))
@@ -282,8 +256,10 @@ def plot_path_to_gui(astar_node_path,map2d,turtle_pos):
     plt.cla()
     plt.plot(np.where(map2d == 0)[0]-200, np.where(map2d == 0)[1]-200, marker='.', color='blue', linestyle="")
     plt.plot(np.where(map2d == 1)[0]-200, np.where(map2d == 1)[1]-200, marker='s', color='black', linestyle="")
-    plt.plot(turtle_pos[0],turtle_pos[1],marker='o',color='red')
-    # plt.plot(astar_node_path[:, 0], (grid_size[0] - 1) - astar_node_path[:, 1], marker='o', color='red')
+    # plt.plot(astar_node_path[:, 0], astar_node_path[:, 1], marker='o', color='red')
+    plt.plot(astar_world_path[:, 0], astar_world_path[:, 1], marker='o', color='red')
+    plt.plot(goalx/resolution,goaly/resolution,marker='o',color='orange')
+    plt.plot(turtle_pos[0]/resolution,turtle_pos[1]/resolution,marker='o',color='green')
     plt.title("Plotting turtlebot")
     plt.show(block=False)
     plt.pause(0.1)
@@ -300,23 +276,25 @@ def init():
     current_node = 0
     world_path = list()
 
-    goal_pos = world_pos_to_node(np.array([round(goalx + 0.01), round(goaly)]))
+    current_goal_dist = 0.5
+
+    goal_pos = world_pos_to_node(np.array([round(goalx/resolution + 0.01), round(goaly/resolution)]))
 
     
 
     # Main Loop
     while not rospy.is_shutdown():
         try:
-            (turtle_pos,turtle_rot) = turtle_world_listener.lookupTransform('/base_footprint','/map',rospy.Time(0))
+            (turtle_pos,turtle_rot) = turtle_world_listener.lookupTransform('/map','/base_footprint',rospy.Time(0))
             printstr = "turtle_pos: [{},{}]".format(turtle_pos[0],turtle_pos[1])
             rospy.loginfo(printstr)
             # start_pos = world_pos_to_node(np.array([first_odom.pose.pose.position.x, first_odom.pose.pose.position.y]))
-            start_pos = world_pos_to_node(np.array([turtle_pos[0], turtle_pos[1]]))
+            start_pos = world_pos_to_node(np.array([turtle_pos[0]/resolution, turtle_pos[1]/resolution]))
             astar_node_path = astar_pathfinder(start_pos, goal_pos)
             astar_node_path = np.vstack((start_pos, astar_node_path))
             for node in astar_node_path:
                 world_path.append(tuple(center_offset(node_to_world_pos(node))))
-            plot_path_to_gui(astar_node_path,map2d,turtle_pos)
+            plot_path_to_gui(astar_node_path,map2d,turtle_pos,goal_pos)
         except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
             rospy.logerr("Error fetching /base_footprint /map tf")
             continue
@@ -339,10 +317,10 @@ def init():
         if rel_yaw > np.pi:
             rel_yaw = np.abs(np.pi - rel_yaw) - np.pi
 
-        if distance < 0.05 and current_node == len(world_path) - 1:
+        if distance < current_goal_dist and current_node == len(world_path) - 1:
             rospy.loginfo("Path Execution complete")
             break
-        if distance < 0.05 and current_node < len(world_path) - 1:
+        if distance < current_goal_dist and current_node < len(world_path) - 1:
             current_node += 1
         twist_msg = Twist()
         yaw_kp = np.min([np.abs(rel_yaw), 2]) / 2
@@ -350,17 +328,17 @@ def init():
         dist_kp = np.min([distance, 0.5]) / 0.5
         # else:
         #     dist_kp = 1
-        if rel_yaw < -np.deg2rad(yaw_thresh) and distance > 0.05:
+        if rel_yaw < -np.deg2rad(yaw_thresh) and distance > current_goal_dist:
             twist_msg.angular.z = -10 * yaw_kp
 
-        elif rel_yaw > np.deg2rad(yaw_thresh) and distance > 0.05:
+        elif rel_yaw > np.deg2rad(yaw_thresh) and distance > current_goal_dist:
             twist_msg.angular.z = 10 * yaw_kp
 
-        elif distance > 0.05:
+        elif distance > current_goal_dist:
             twist_msg.linear.x = 2.0 * dist_kp
         else:
             twist_msg.linear.x = 0.0
-        # turtle_bot.cmd_pub.publish(twist_msg)
+        turtle_bot.cmd_pub.publish(twist_msg)
 
         rate.sleep()
 
