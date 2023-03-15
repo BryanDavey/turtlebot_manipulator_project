@@ -1,0 +1,5 @@
+<launch>
+    <node name="costmap_node" pkg="costmap_2d" type="costmap_2d_node" >
+        <rosparam file="$(find turtlebot_practice)/params/costmap_params.yaml" command="load" ns="local_costmap" />
+    </node>
+</launch>

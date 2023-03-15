@@ -1,0 +1,30 @@
+{
+  "configurations": [
+    {
+      "browse": {
+        "databaseFilename": "${default}",
+        "limitSymbolsToIncludedHeaders": false
+      },
+      "includePath": [
+        "/home/winning/catkin_ws/devel/include/**",
+        "/opt/ros/noetic/include/**",
+        "/home/winning/catkin_ws/src/my_robot_tutorials/include/**",
+        "/home/winning/catkin_ws/src/open_manipulator/open_manipulator_control_gui/include/**",
+        "/home/winning/catkin_ws/src/open_manipulator/open_manipulator_controller/include/**",
+        "/home/winning/catkin_ws/src/open_manipulator/open_manipulator_libs/include/**",
+        "/home/winning/catkin_ws/src/open_manipulator/open_manipulator_teleop/include/**",
+        "/home/winning/catkin_ws/src/open_manipulator_dependencies/roboticsgroup_gazebo_plugins/include/**",
+        "/home/winning/catkin_ws/src/turtlebot3_simulations/turtlebot3_fake/include/**",
+        "/home/winning/catkin_ws/src/turtlebot3_simulations/turtlebot3_gazebo/include/**",
+        "/home/winning/catkin_ws/src/turtlebot_practice/include/**",
+        "/usr/include/**"
+      ],
+      "name": "ROS",
+      "intelliSenseMode": "gcc-x64",
+      "compilerPath": "/usr/bin/gcc",
+      "cStandard": "gnu11",
+      "cppStandard": "c++14"
+    }
+  ],
+  "version": 4
+}

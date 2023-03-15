@@ -1,0 +1,7 @@
+[INFO] [1678811435.397369, 638.832000]: Initiating Path Execution.
+Traceback (most recent call last):
+  File "/home/winning/catkin_ws/src/turtlebot_practice/scripts/aStar.py", line 373, in <module>
+    init()
+  File "/home/winning/catkin_ws/src/turtlebot_practice/scripts/aStar.py", line 305, in init
+    local_goal = np.array(world_path[current_node])
+IndexError: list index out of range
