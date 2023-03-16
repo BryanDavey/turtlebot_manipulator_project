@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 
 import rospy
+import threading
 from geometry_msgs.msg import Twist, Quaternion, Point
 from nav_msgs.msg import Odometry
 from nav_msgs.msg import OccupancyGrid
+from nav_msgs.msg import Path
+from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import Image
 import tf
 import time
@@ -18,10 +21,12 @@ turtle_pos = (-1,-1,-1)
 turtle_rot = (-1,-1,-1,-1)
 resolution = 0.05
 astar_node_path = np.array(np.array([]))
-goalx = 0.0
-goaly = 0.0
+goalx = 2.0
+goaly = 2.0
 map2d = np.array([])
-dialatedmap=np.array([])
+dilated_map=np.array([])
+
+lock = threading.Lock()
 
 
 
@@ -32,6 +37,7 @@ class Turtlebot:
         self.odom_sub = rospy.Subscriber('/odom', Odometry, self.odom_callback)
         self.cmd_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
         self.dilatedmap_pub = rospy.Publisher('/dilated_map', OccupancyGrid, queue_size=10)
+        self.path_pub = rospy.Publisher('/path', Path, queue_size=10)
         self.pos = np.array([])
         self.ort = Quaternion()
         self.start_pos = None
@@ -99,7 +105,9 @@ def map_callback(grid):
     resolution = grid.info.resolution
 
     raw_map = np.array(data).reshape((height, width))
+    # Compensating for y-axis being inverted
     raw_map = np.flip(raw_map, axis=1)
+
     # rospy.loginfo("unique values: {}".format(np.unique(map2d)))
     # mask = np.where(raw_map > 0.2)
     # for i in range(len(mask[0])):
@@ -107,22 +115,26 @@ def map_callback(grid):
     mask = np.where(raw_map < 0.0)
     for i in range(len(mask[0])):
         raw_map[mask[0][i]][mask[1][i]] = 0
-    printstr = "occupancygrid shape: {}".format(map2d.shape)
-    struct2= np.ones((3,3))
-    dialatedmap= ndimage.binary_dilation(raw_map,structure=struct2).astype(raw_map.dtype)
-    dialatedmap=np.flip(dialatedmap, axis=1)
-    printstr = "dialatedmap: {}".format(dialatedmap.shape)
-    rospy.loginfo(printstr)
-    printstr = "unique values: {}".format(np.unique(raw_map))
-    rospy.loginfo(printstr)
-    map2d=dialatedmap
-    mask = np.where(dialatedmap == 1)
-    for i in range(len(mask[0])):
-        dialatedmap[mask[0][i]][mask[1][i]] = 100
-    # Compensating for y-axis being inverted
+
+    struct2= np.ones((5,5))
+    dilated_map= ndimage.binary_dilation(raw_map,structure=struct2).astype(raw_map.dtype)
+    # dilated_map=np.flip(dilated_map, axis=1)
+    # dilated_map = np.rot90(dilated_map)
+
     dilmap = grid
-    dilmap.data = tuple(dialatedmap.flatten())
+    dilmap.data = tuple(dilated_map.flatten())
     turtle_bot.dilatedmap_pub.publish(dilmap)
+
+    try:
+        lock.acquire()
+        map2d=dilated_map
+        rospy.logerr("callback acquired lock.")
+        printstr = "unique values: {}".format(np.unique(map2d))
+        rospy.logerr(printstr)
+    except:
+        rospy.logerr("callback failed to acquire lock.")
+    finally:
+        lock.release()
 
 
 # Shifts the bots postion to center of the grid tile - improves visually
@@ -171,6 +183,17 @@ class Node:
 
 # A-star algorithm implementation
 def astar_pathfinder(bot_pos_in_node, goal_pos_in_node):
+    try:
+        lock.acquire()
+        astar_map = map2d
+        rospy.logerr("pathfinder acquired lock.")
+        printstr = "unique values: {}".format(np.unique(astar_map))
+        rospy.logerr(printstr)
+    except:
+        rospy.logerr("pathfinder failed to acquire lock.")
+    finally:
+        lock.release()
+    astar_map = np.rot90(astar_map)
     e = 5
     open_nodes: list = []
     closed_nodes: list = []
@@ -198,15 +221,16 @@ def astar_pathfinder(bot_pos_in_node, goal_pos_in_node):
 
         curr2goal_dist = np.linalg.norm(node_to_world_pos(goal_pos_in_node) - node_to_world_pos(current_node.pos))
         # rospy.loginfo(f"Working: {curr2goal_dist}")
+        node_path = []
         if curr2goal_dist < 0.5:
-            node_path = []
             search_node = current_node
             while True:
                 if search_node.parent is None:
                     break
                 node_path.append(search_node.pos)
                 search_node = search_node.parent
-            return np.flip(np.array(node_path), axis=0)
+            break
+            # return np.flip(np.array(node_path), axis=0)
 
         st_path_blocked = [False, False, False, False]
 
@@ -231,7 +255,7 @@ def astar_pathfinder(bot_pos_in_node, goal_pos_in_node):
                 continue
             if neighbor_node in closed_nodes:
                 continue
-            if map2d[int(round(neighbor_node.pos[0])), int(round((grid_size[0] - 1) - neighbor_node.pos[1]))] == 100:
+            if astar_map[int(round(neighbor_node.pos[0])), int(round((grid_size[0] - 1) - neighbor_node.pos[1]))] == 1:
                 if index < 4:
                     st_path_blocked[index] = True
                 continue
@@ -251,9 +275,25 @@ def astar_pathfinder(bot_pos_in_node, goal_pos_in_node):
 
             if neighbor_node not in open_nodes:
                 open_nodes.append(neighbor_node)
+    rviz_path = Path()
+    if len(node_path) > 1:
+        for node in node_path:
+            this_pose = PoseStamped()
+            this_pose.pose.position.x = node[0]
+            this_pose.pose.position.y = node[1]
+            this_pose.pose.position.z = 0
+            # this_pose.header.frame_id = 
+            rviz_path.poses.append(this_pose)
+        turtle_bot.path_pub.publish(rviz_path)
+        return np.flip(np.array(node_path), axis=0)
+    else:
+        return np.array([0,0,0,0])
 
-def plot_path_to_gui(astar_node_path,map2d,turtle_pos,goal_pos):
+def plot_path_to_gui(astar_node_path,plot_map,turtle_pos,goal_pos):
     global resolution
+    mask = np.where(plot_map < 0.0)
+    for i in range(len(mask[0])):
+        plot_map[mask[0][i]][mask[1][i]] = 0
     
     # Compensating for y-axis being inverted
     # map2d = np.flip(map2d, axis=1)
@@ -276,15 +316,18 @@ def plot_path_to_gui(astar_node_path,map2d,turtle_pos,goal_pos):
     # string_map = str(map_for_print).replace(' [', '').replace('[', '').replace(']', '').replace('0', ' ').replace('5', '*')
     # rospy.loginfo(f"\nMap:\n{string_map}")
     
-    
+    turtle_node_pos = world_pos_to_node([turtle_pos[0]/resolution,turtle_pos[1]/resolution])
+    goal_node_pos = world_pos_to_node([goalx/resolution,goaly/resolution])
     # Path Visualization
     plt.cla()
     # plt.plot(np.where(map2d == 0)[0]-200, np.where(map2d == 0)[1]-200, marker='.', color='blue', linestyle="")
-    plt.plot(np.where(map2d == 1)[0]-200, np.where(map2d == 1)[1]-200, marker='s', color='black', linestyle="")
-    # plt.plot(astar_node_path[:, 0], astar_node_path[:, 1], marker='o', color='red')
-    plt.plot(astar_world_path[:, 0], astar_world_path[:, 1], marker='o', color='red')
-    plt.plot(goalx/resolution,goaly/resolution,marker='o',color='orange')
-    plt.plot(turtle_pos[0]/resolution,turtle_pos[1]/resolution,marker='o',color='green')
+    plt.plot(np.where(plot_map == 1)[0], np.where(plot_map == 1)[1], marker='s', color='black', linestyle="")
+    plt.plot(astar_node_path[:, 0], astar_node_path[:, 1], marker='o', color='red')
+    # plt.plot(astar_world_path[:, 0], astar_world_path[:, 1], marker='o', color='red')
+    # plt.plot(goalx/resolution,goaly/resolution,marker='o',color='orange')
+    plt.plot(goal_node_pos[0],goal_node_pos[1],marker='o',color='orange')
+    # plt.plot(turtle_pos[0]/resolution,turtle_pos[1]/resolution,marker='o',color='green')
+    plt.plot(turtle_node_pos[0],turtle_node_pos[1],marker='o',color='green')
     plt.title("Plotting turtlebot")
     plt.show(block=False)
     plt.pause(0.1)
@@ -321,7 +364,7 @@ def init(dilated_map_pub):
             for node in astar_node_path:
                 # world_path.append(tuple(center_offset(node_to_world_pos(node))))
                 world_path.append(tuple(node_to_world_pos(node)))
-            # plot_path_to_gui(astar_node_path,map2d,turtle_pos,goal_pos)
+            plot_path_to_gui(astar_node_path,map2d,turtle_pos,goal_pos)
         except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
             rospy.logerr("Error fetching /base_footprint /map tf")
             continue
