@@ -36,8 +36,6 @@ class CallbackHandler():
         self.odom_sub = rospy.Subscriber('/odom', Odometry, self.odom_callback)
 
     def mapCallback(self, grid):
-        now = rospy.get_rostime()
-        rospy.logwarn("map received, time: %i %i", now.secs, now.nsecs)
         self.grid = grid
         self.data = grid.data
         self.height = grid.info.height
@@ -68,10 +66,9 @@ def world2map(mapObject,worldx,worldy):
     res=mapObject.grid.info.resolution# 0.05m/p
     Xoffset= mapObject.grid.info.origin.position.x #offset in m 
     Yoffset = mapObject.grid.info.origin.position.y #offset in m
-    pixx=int(round((-Xoffset+worldx)*(1/res)))
-    pixy=int(round((-Yoffset+worldy)*(1/res)))
-    if (pixx>mapObject.grid.info.width | pixy >mapObject.grid.info.height):
-        print("HERE YOU GO BRYAN ARE YOU HAPPY NOW 8===D~ (:)")
+    # x and y are inverted between map and world
+    pixy=int(round((-Xoffset+worldx)*(1/res)))
+    pixx=int(round((-Yoffset+worldy)*(1/res)))
     return(pixx,pixy)
 
 
@@ -79,8 +76,9 @@ def map2world(mapObject,mapx,mapy):
     res = mapObject.grid.info.resolution #0.05m/px
     xOffset = mapObject.grid.info.origin.position.x #-10
     yOffset = mapObject.grid.info.origin.position.y #-10
-    worldx = mapx*res + xOffset
-    worldy = mapy*res + yOffset
+    # x and y are inverted between map and world
+    worldy = mapx*res + xOffset
+    worldx = mapy*res + yOffset
     return(worldx,worldy)
 
 def main(mapHandler):
@@ -131,14 +129,19 @@ def main(mapHandler):
              [0,0,0,0,0,1,1,1,1,1,1,0,0,0,0,0]]#6
     radius_mask=np.array([np.array(xi) for xi in map16])
 
+    tf_listener = tf.TransformListener()
+
 
     # path = astar(maze, start, end)
     # print(path)
+
+    while(not mapHandler.newMap):
+        # Wait until first map has been published
+        rospy.sleep(0.1)
     while not rospy.is_shutdown():
+        # Read new map and publish dilated map
         if (mapHandler.newMap):
             mapHandler.newMap = False
-            start = world2map(mapHandler,0, 0)
-            end = world2map(mapHandler,-1.5,-1.5)
             map2d = np.copy(mapHandler.map2d)
             mask = np.where(map2d < 0.0)
             for i in range(len(mask[0])):
@@ -150,33 +153,43 @@ def main(mapHandler):
             assert dilated_map.min() == 1, "cost of moving must be at least 1"
             dilation_time = rospy.get_rostime()
 
-            path = pyastar2d.astar_path(dilated_map, np.array(start), np.array(end), allow_diagonal=True)
-            # path = astar(dilated_map, start, end)
-            astar_time = rospy.get_rostime() - dilation_time
-            path_data = np.zeros([mapHandler.width,mapHandler.height])
-            if path.shape[0] > 0:
-                if len(path) > 1:
-                    for i in path:
-                        path_data[i[0],i[1]] = 100
-                    # Publish map 
-                    path_data = np.asarray(path_data, dtype = 'int')
-                    path_map = copy.deepcopy(mapHandler.grid)
-                    path_data = list(path_data.ravel())
-                    path_map.data = path_data
-                    mapHandler.map_pub.publish(path_map)
-                else:
-                    rospy.logerr('path not long enough?')
-            else:
-                rospy.logerr('Invalid path.')
-
             # Publish dilated map
-            dilated_map[dilated_map > 1] = 100
-            dilated_map[dilated_map == 1] = 0
+            dilated_2pub = np.copy(dilated_map)
+            dilated_2pub[dilated_map > 1] = 100
+            dilated_2pub[dilated_map == 1] = 0
             dilmap = copy.deepcopy(mapHandler.grid)
-            dilmap.data = tuple(dilated_map.astype(int).flatten())
+            dilmap.data = tuple(dilated_2pub.astype(int).flatten())
             mapHandler.dilmap_pub.publish(dilmap)
 
-        rospy.sleep(0.1)
+        # Get turtlebot position
+        (turtle_pos,turtle_rot) = tf_listener.lookupTransform('/map','/base_footprint',rospy.Time(0))
+
+        rospy.loginfo('bot position (x,y)m: ({},{})'.format(turtle_pos[0],turtle_pos[1]))
+        start = world2map(mapHandler,turtle_pos[0], turtle_pos[1])
+        rospy.loginfo('bot pos in map coords: {}'.format(start))
+        end = world2map(mapHandler,-1.5,-1.5)
+
+        # Compute A* path
+        path = pyastar2d.astar_path(dilated_map, np.array(start), np.array(end), allow_diagonal=True)
+        astar_time = rospy.get_rostime() - dilation_time
+        path_data = np.zeros([mapHandler.width,mapHandler.height])
+        if path is not None:
+            if len(path) > 1:
+                for i in path:
+                    path_data[i[0],i[1]] = 100
+                # Publish map 
+                path_data = np.asarray(path_data, dtype = 'int')
+                path_map = copy.deepcopy(mapHandler.grid)
+                path_data = list(path_data.ravel())
+                path_map.data = path_data
+                mapHandler.map_pub.publish(path_map)
+            else:
+                rospy.logerr('path not long enough?')
+        else:
+            rospy.logerr('Invalid path.')
+
+        # Run at max 20Hz
+        rospy.sleep(0.05)
 
 def testCallback(data):
     rospy.logerr('data received')
