@@ -13,9 +13,27 @@ from sensor_msgs.msg import Image
 import tf
 import time
 from scipy import ndimage
+from scipy.ndimage.filters import gaussian_filter
 
 import numpy as np
 import matplotlib.pyplot as plt
+
+class Turtlebot:
+    def __init__(self):
+        self.odom_sub = rospy.Subscriber('/odom', Odometry, self.odom_callback)
+        self.cmd_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
+        self.pos = np.array([])
+        self.ort = Quaternion()
+        self.start_pos = None
+
+    def odom_callback(self, data):
+        self.pos = np.array([data.pose.pose.position.x, data.pose.pose.position.y])
+        self.ort = data.pose.pose.orientation
+        # orientation_list = [self.ort.x, self.ort.y, self.ort.z, self.ort.w]
+        # (roll, pitch, yaw) =  tf.transformations.euler_from_quaternion(orientation_list)
+        # current_yaw = yaw
+
+turtle_bot = Turtlebot()
 
 class CallbackHandler():
     def __init__(self):
@@ -32,7 +50,7 @@ class CallbackHandler():
         # Odometry stuff
         self.pos = np.array([])
         self.ort = Quaternion()
-        self.turnRadius = 220 #mm
+        self.turnRadius = 0#mm
         self.odom_sub = rospy.Subscriber('/odom', Odometry, self.odom_callback)
 
     def mapCallback(self, grid):
@@ -82,62 +100,36 @@ def map2world(mapObject,mapx,mapy):
     return(worldx,worldy)
 
 def main(mapHandler):
+    current_node = 6
+    rate = rospy.Rate(10)
+
     #Row then column 
     # (0,1) is 0th row 1st column
-    # Diameter 22
-           #0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-    map22 = [[0,0,0,0,0,0,0,0,1,1,1,1,1,1,0,0,0,0,0,0,0,0],#0
-             [0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0],#1
-             [0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0],#2
-             [0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0],#3
-             [0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0],#4
-             [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],#5
-             [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],#6
-             [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],#7
-             [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],#8
-             [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],#9
-             [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],#10
-             [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],#1
-             [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],#2
-             [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],#3
-             [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],#4
-             [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],#5
-             [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],#6
-             [0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0],#7
-             [0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0],#8
-             [0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0],#9
-             [0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0],#20
-             [0,0,0,0,0,0,0,0,1,1,1,1,1,1,0,0,0,0,0,0,0,0]]#1
-
-    # Diameter 16
-    #         1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6
-    map16 = [[0,0,0,0,0,1,1,1,1,1,1,0,0,0,0,0],#1
-             [0,0,0,1,1,1,1,1,1,1,1,1,1,0,0,0],#2
-             [0,0,1,1,1,1,1,1,1,1,1,1,1,1,0,0],#3
-             [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],#4
-             [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],#5
-             [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],#6
-             [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],#7
-             [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],#8
-             [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],#9
-             [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],#0
-             [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],#1
-             [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],#2
-             [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],#3
-             [0,0,1,1,1,1,1,1,1,1,1,1,1,1,0,0],#4
-             [0,0,0,1,1,1,1,1,1,1,1,1,1,0,0,0],#5
-             [0,0,0,0,0,1,1,1,1,1,1,0,0,0,0,0]]#6
-    radius_mask=np.array([np.array(xi) for xi in map16])
+  
+           #  1 2 3 4 5 6 7 8 9 10 11
+    map11= [[0,0,0,1,1,1,1,1,0,0,0], #1
+            [0,0,1,1,1,1,1,1,1,0,0], #2
+            [0,1,1,1,1,1,1,1,1,1,0], #3
+            [1,1,1,1,1,1,1,1,1,1,1], #4
+            [1,1,1,1,1,1,1,1,1,1,1], #5
+            [1,1,1,1,1,1,1,1,1,1,1], #6
+            [1,1,1,1,1,1,1,1,1,1,1], #7
+            [1,1,1,1,1,1,1,1,1,1,1], #8
+            [0,1,1,1,1,1,1,1,1,1,0], #9
+            [0,0,1,1,1,1,1,1,1,0,0], #10
+            [0,0,0,1,1,1,1,1,0,0,0]] #11
+    radius_mask=np.array([np.array(xi) for xi in map11])
 
     tf_listener = tf.TransformListener()
 
 
-    # path = astar(maze, start, end)
-    # print(path)
+
 
     while(not mapHandler.newMap):
         # Wait until first map has been published
         rospy.sleep(0.1)
+
+    #main loop
     while not rospy.is_shutdown():
         # Read new map and publish dilated map
         if (mapHandler.newMap):
@@ -146,37 +138,49 @@ def main(mapHandler):
             mask = np.where(map2d < 0.0)
             for i in range(len(mask[0])):
                 map2d[mask[0][i]][mask[1][i]] = 0
-            map2d = np.divide(map2d,100).astype(int)
+            # map2d = np.divide(map2d,100).astype(int)
             dilated_map = ndimage.binary_dilation(map2d,structure=radius_mask).astype(map2d.dtype).astype(np.float32)
-            dilated_map[dilated_map == 1] = np.inf
-            dilated_map[dilated_map == 0] = 1
+            print('b4 dilated_map.min: {}, max: {}\n'.format(map2d.min(),map2d.max()))
+            dilated_map = (gaussian_filter(dilated_map, sigma=3)*1E24).astype(np.float32)
+            mask = np.where(dilated_map < 1)
+            for i in range(len(mask[0])):
+                dilated_map[mask[0][i]][mask[1][i]] = 1
+            print('dilated_map.min: {}, max: {}\n'.format(dilated_map.min(),dilated_map.max()))
+            # dilated_map[dilated_map == 1] = np.inf
+            # dilated_map[dilated_map == 0] = 1
             assert dilated_map.min() == 1, "cost of moving must be at least 1"
             dilation_time = rospy.get_rostime()
 
             # Publish dilated map
             dilated_2pub = np.copy(dilated_map)
-            dilated_2pub[dilated_map > 1] = 100
-            dilated_2pub[dilated_map == 1] = 0
+            dilated_2pub = dilated_2pub/dilated_2pub.max()*100
+            print("unique vals: {}\n".format(np.unique(dilated_2pub)))
+            # dilated_2pub[dilated_map > 1] = 100
+            # dilated_2pub[dilated_map == 1] = 0
             dilmap = copy.deepcopy(mapHandler.grid)
             dilmap.data = tuple(dilated_2pub.astype(int).flatten())
+            print("unique vals: {}\n".format(np.unique(dilated_2pub)))
             mapHandler.dilmap_pub.publish(dilmap)
 
         # Get turtlebot position
         (turtle_pos,turtle_rot) = tf_listener.lookupTransform('/map','/base_footprint',rospy.Time(0))
 
-        rospy.loginfo('bot position (x,y)m: ({},{})'.format(turtle_pos[0],turtle_pos[1]))
+        # rospy.loginfo('bot position (x,y)m: ({},{})'.format(turtle_pos[0],turtle_pos[1]))
         start = world2map(mapHandler,turtle_pos[0], turtle_pos[1])
-        rospy.loginfo('bot pos in map coords: {}'.format(start))
-        end = world2map(mapHandler,-1.5,-1.5)
+        # rospy.loginfo('bot pos in map coords: {}'.format(start))
+        end = world2map(mapHandler,0,-2)
 
         # Compute A* path
         path = pyastar2d.astar_path(dilated_map, np.array(start), np.array(end), allow_diagonal=True)
-        astar_time = rospy.get_rostime() - dilation_time
+    
         path_data = np.zeros([mapHandler.width,mapHandler.height])
         if path is not None:
             if len(path) > 1:
                 for i in path:
                     path_data[i[0],i[1]] = 100
+                    #rospy.loginfo(f"\npath:\n {path}")
+                path_data[0,0] = 100
+                path_data[1,0] = 100
                 # Publish map 
                 path_data = np.asarray(path_data, dtype = 'int')
                 path_map = copy.deepcopy(mapHandler.grid)
@@ -191,6 +195,58 @@ def main(mapHandler):
         # Run at max 20Hz
         rospy.sleep(0.05)
 
+        
+        if (len(path) < 2 or current_node >= len(path)):
+            local_goal = np.array(end)
+        else:
+            local_goal = (path[current_node])  # current goal is the nth node in the astar list
+        yaw_thresh = 15
+        orientation_list = [turtle_bot.ort.x, turtle_bot.ort.y, turtle_bot.ort.z, turtle_bot.ort.w] # gets the quat of the rotation
+        (roll, pitch, yaw) =  tf.transformations.euler_from_quaternion(orientation_list) # gets roll pitch and yah from th quart
+        current_yaw = yaw # the yaw of the robot at that moment in time
+        distance = np.linalg.norm(start - local_goal) # distance from current node to goal node
+        angle_to_goal = np.arctan2(local_goal[0] - start[0], local_goal[1] - start[1]) #- current_yaw
+        rel_yaw = np.arctan2(np.sin(angle_to_goal - current_yaw), np.cos(angle_to_goal - current_yaw))
+        rel_yaw = rel_yaw + np.pi
+        
+        turn_cmd = Twist()
+
+        if rel_yaw > np.pi:
+             rel_yaw = np.abs(np.pi - rel_yaw) - np.pi
+
+        if (current_yaw < 0):
+            current_yaw_0_360 = current_yaw + 2*np.pi
+        else:
+            current_yaw_0_360 = current_yaw
+        if (angle_to_goal < 0):
+            angle_to_goal_0_360 = angle_to_goal + 2*np.pi
+        else:
+            angle_to_goal_0_360 = angle_to_goal
+        d = current_yaw_0_360 - angle_to_goal_0_360
+        if (d<0):
+            d += 2*np.pi
+
+        if d > np.pi:
+            turn_cmd.angular.z = (0.05*abs(d)+0.15)
+        elif d <= np.pi:
+            turn_cmd.angular.z = -(0.05*abs(d)+0.15)
+      
+        DegreeDiff= np.rad2deg(np.abs((d)))
+        if (distance > 0.5) and (DegreeDiff < yaw_thresh):
+            turn_cmd.linear.x = 0.02*current_node
+        
+
+            
+        if distance <1:
+                turn_cmd.linear.x = 0.0
+                turn_cmd.angular.z = 0.0
+                turtle_bot.cmd_pub.publish(turn_cmd)
+                rospy.loginfo(f"\n destination reached!")
+                break
+    
+        turtle_bot.cmd_pub.publish(turn_cmd)    
+
+
 def testCallback(data):
     rospy.logerr('data received')
 
@@ -200,7 +256,6 @@ if __name__ == '__main__':
 
     mapHandler = CallbackHandler()
     main(mapHandler)
-    rospy.spin()
 
 
     
