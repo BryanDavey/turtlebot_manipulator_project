@@ -12,8 +12,10 @@ from nav_msgs.msg import Odometry
 from nav_msgs.msg import OccupancyGrid
 from sensor_msgs.msg import LaserScan
 from tf import transformations as ts
+import copy
 
-pub = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
+
+# pub = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
 
 class CallbackHandler():
     def __init__(self):
@@ -25,9 +27,13 @@ class CallbackHandler():
         self.map2d = None
         self.newMap = False
         self.map_sub = rospy.Subscriber('/map', OccupancyGrid, self.mapCallback)
-        self.map_pub = rospy.Publisher('/aStar_map', OccupancyGrid, queue_size=10)
+        self.map_pub = rospy.Publisher('/aStar_map', OccupancyGrid, queue_size=2)
+        self.lidar_map_pub = rospy.Publisher('/lidar_map', OccupancyGrid, queue_size=2)
         self.dilmap_pub = rospy.Publisher('/dilated_map', OccupancyGrid, queue_size=10)
         # Odometry stuff
+
+        #Lidar stuff
+        self.Map_data = None
 
     def mapCallback(self, grid):
         self.grid = grid
@@ -60,13 +66,14 @@ def odomCallback(data):
     
 
 def laserCallback(data):
+    timestamp = data.header.stamp
     incrementAngle = data.angle_increment
     maxAngle = data.angle_max
     minAngle = data.angle_min
     rangeData = data.ranges
 
-    
-    (lidar_pos,Lidar_rot_quart) = tf_listener.lookupTransform('/map','/base_footprint',rospy.Time(0))
+    tf_listener.waitForTransform('/map','/base_scan',timestamp,rospy.Duration(1))
+    (lidar_pos,Lidar_rot_quart) = tf_listener.lookupTransform('/map','/base_scan',timestamp)
     Lidar_rot = R.from_quat([Lidar_rot_quart])
     Lidar_rot = Lidar_rot.as_matrix()
     Lidar_Tform=[[ Lidar_rot[0,0,0], Lidar_rot[0,0,1], Lidar_rot[0,0,2], lidar_pos[0]],
@@ -78,26 +85,49 @@ def laserCallback(data):
     # rospy.loginfo("First element: %f, Last: %f", rangeData[0], rangeData[len(rangeData)-1])
     # rospy.loginfo(rangeData)
     # rospy.loginfo(len(rangeData))
-    RangeDataXY = np.array(([[0.00,0.00,0.00,1.00]]*360),dtype=float)
-    Lidar_points_to_origin_m=np.array(([[0.00,0.00,0.00,1.00]]*360),dtype=float)
-    for i in range(len(rangeData)):
-        if rangeData[i] <= 4:
+    RangeDataXY_px = np.empty((0,2),int)
+    # mapHandler.Map_data = np.zeros((mapHandler.width,mapHandler.height),int)
+
+    for i,range in enumerate(rangeData):
+        if not np.isinf(range):
             rad= np.deg2rad(i)
-            x=round(np.cos(rad)*rangeData[i],2)
-            x=round(x/0.05)*0.05
-            y=round(np.sin(rad)*rangeData[i],2)
-            y=round(y/0.05)*0.05
+            x=round(np.cos(rad)*range,2)
+            # x=round(x/0.05)*0.05
+            y=round(np.sin(rad)*range,2)
+            # y=round(y/0.05)*0.05
 
             # RangeDataXYpix=world2map(mapHandler,round(x/0.05)*0.05,round(y/0.05)*0.05)
-            RangeDataXY[i]=(int(x),int(y),0,1)
-            Lidar_points_to_origin_m[i]=np.matmul(RangeDataXY[i], Lidar_Tform)  # in rads and metter( i think)
-            
-        else:
-            RangeDataXY[i]=(0,0,0,1)
+            point_wrt_origin_m = np.matmul(Lidar_Tform,(x,y,0,1))
+            point_wrt_origin_px = (np.rint(world2map(mapHandler,point_wrt_origin_m[0],point_wrt_origin_m[1]))).astype(int)
+            RangeDataXY_px = np.vstack([RangeDataXY_px,point_wrt_origin_px])
+            # Lidar_points_to_origin_m[i]=np.matmul(RangeDataXY[i], Lidar_Tform)  # in rads and metter( i think)
+            # (Lidar_points_to_origin_Pix[i,[0]],Lidar_points_to_origin_Pix[i,[1]])=world2map(mapHandler,Lidar_points_to_origin_m[i][0],Lidar_points_to_origin_m[i][1])
+            # print(Lidar_points_to_origin_Pix[i])
+        # else:
+            # RangeDataXY[i]=(0,0,0,1)
+            # Lidar_points_to_origin_Pix[i]=(0,0)
+    #print(Lidar_points_to_origin_Pix)
+    # print("rangedata: {}".format(RangeDataXY_px))
+    # print('RangeDataXY_px: {}'.format(RangeDataXY_px))
+    # print('test array: {}'.format(np.array([[1,1],[2,2],[3,3]])))
+    # print(range(len(rangeData)))
+    for i in RangeDataXY_px:
+        mapHandler.Map_data[i[0],i[1]] = 100
+
+            #rospy.loginfo(f"\npath:\n {path}")
+        # Map_data[0,0] = 100
+        # Map_data[1,0] = 100
+                # Publish map 
+        # Map_data = np.asarray(Map_data, dtype = 'int')
+    path_map = copy.deepcopy(mapHandler.grid)
+    path_map.data = tuple(mapHandler.Map_data.flatten())
+    # print('length of path_map: {}',len(path_map.data))
+    # print('length of grid: {}',len(mapHandler.grid.data))
     
-    print(Lidar_points_to_origin_m[0])
-    # for i in range(len(rangeData)):
-    #     Lidar_points_to_origin_pix=world2map(mapHandler,,round(y/0.05)*0.05)
+    # Map_data_print = list(Map_data.ravel())
+    # path_map.data = Map_data_print
+    mapHandler.lidar_map_pub.publish(path_map)
+
        
     
 
@@ -108,11 +138,16 @@ def talker(mapHandler):
     sub = rospy.Subscriber('/odom', Odometry, odomCallback)
     laserSub = rospy.Subscriber('/scan', LaserScan, laserCallback)
 
-    # Publish enitial command
-    twist = Twist()
-    twist.linear.x = 0.1
+    # # Publish enitial command
+    # twist = Twist()
+    # twist.linear.x = 0.1
 
-    pub.publish(twist)
+    # pub.publish(twist)
+
+    while(not mapHandler.newMap):
+        # Wait until first map has been published
+        rospy.sleep(0.1)
+    mapHandler.Map_data = np.zeros([mapHandler.width,mapHandler.height],int)
     try:
         rospy.spin()
     except KeyboardInterrupt:
@@ -143,7 +178,7 @@ if __name__ == '__main__':
     
 
 
-    twist = Twist()
-    twist.linear.x = 0
-    twist.angular.z = 0
-    pub.publish(twist)
+    # twist = Twist()
+    # twist.linear.x = 0
+    # twist.angular.z = 0
+    # pub.publish(twist)
