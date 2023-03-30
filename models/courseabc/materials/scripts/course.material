@@ -1,0 +1,14 @@
+material courseabc
+{
+  technique
+  {
+    pass
+    {
+      texture_unit
+      {
+        texture primary_maze.png
+      }
+    }
+  }
+}
+
