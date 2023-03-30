@@ -1,0 +1,13 @@
+material red_tape/main
+{
+	technique
+	{
+		pass
+		{
+			texture_unit
+			{
+				texture primary_maze.png
+			}
+		}
+	}
+}

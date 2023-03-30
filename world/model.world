@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+
+<sdf>
+    <world name="default">
+        <!--Ground Plane-->
+        <include>
+            <uri>model://ground_plane</uri>
+        </include>
+
+        <!-- Source light-->
+        <include>
+            <uri>model://sun</uri>
+        </include>
+
+        <!--Custom Model-->
+        <!-- <include>
+            <uri>model://primary_maze</uri>
+        </include> -->
+    </world>
+</sdf>
