@@ -182,6 +182,8 @@ def main(mapHandler):
         path = pyastar2d.astar_path(dilated_map, np.array(start), np.array(end), allow_diagonal=True)
     
         path_data = np.zeros([mapHandler.width,mapHandler.height])
+        print(mapHandler.width)
+        
         if path is not None:
             if len(path) > 1:
                 for i in path:
