@@ -118,7 +118,16 @@ def main(mapHandler):
             [0,1,1,1,1,1,1,1,1,1,0], #9
             [0,0,1,1,1,1,1,1,1,0,0], #10
             [0,0,0,1,1,1,1,1,0,0,0]] #11
-    radius_mask=np.array([np.array(xi) for xi in map11])
+
+         #  1 2 3 4 5 6 7
+    map7= [[0,0,1,1,1,0,0], #1
+           [0,1,1,1,1,1,0], #2
+           [1,1,1,1,1,1,1], #3
+           [1,1,1,1,1,1,1], #4
+           [1,1,1,1,1,1,1], #5
+           [0,1,1,1,1,1,0], #6
+           [0,0,1,1,1,0,0]] #7
+    radius_mask=np.array([np.array(xi) for xi in map7])
 
     tf_listener = tf.TransformListener()
 
@@ -141,7 +150,7 @@ def main(mapHandler):
             # map2d = np.divide(map2d,100).astype(int)
             dilated_map = ndimage.binary_dilation(map2d,structure=radius_mask).astype(map2d.dtype).astype(np.float32)
             print('b4 dilated_map.min: {}, max: {}\n'.format(map2d.min(),map2d.max()))
-            dilated_map = (gaussian_filter(dilated_map, sigma=3)*1E24).astype(np.float32)
+            dilated_map = (gaussian_filter(dilated_map, sigma=2)*1E24).astype(np.float32)
             mask = np.where(dilated_map < 1)
             for i in range(len(mask[0])):
                 dilated_map[mask[0][i]][mask[1][i]] = 1
@@ -154,21 +163,20 @@ def main(mapHandler):
             # Publish dilated map
             dilated_2pub = np.copy(dilated_map)
             dilated_2pub = dilated_2pub/dilated_2pub.max()*100
-            print("unique vals: {}\n".format(np.unique(dilated_2pub)))
             # dilated_2pub[dilated_map > 1] = 100
             # dilated_2pub[dilated_map == 1] = 0
             dilmap = copy.deepcopy(mapHandler.grid)
             dilmap.data = tuple(dilated_2pub.astype(int).flatten())
-            print("unique vals: {}\n".format(np.unique(dilated_2pub)))
             mapHandler.dilmap_pub.publish(dilmap)
 
         # Get turtlebot position
-        (turtle_pos,turtle_rot) = tf_listener.lookupTransform('/map','/base_footprint',rospy.Time(0))
+        (turtle_pos,turtle_rot) = tf_listener.lookupTransform('/odom','/base_footprint',rospy.Time(0))
 
         # rospy.loginfo('bot position (x,y)m: ({},{})'.format(turtle_pos[0],turtle_pos[1]))
         start = world2map(mapHandler,turtle_pos[0], turtle_pos[1])
         # rospy.loginfo('bot pos in map coords: {}'.format(start))
-        end = world2map(mapHandler,0,-2)
+        # end = world2map(mapHandler,1.3,2.8)
+        end = world2map(mapHandler,4,2)
 
         # Compute A* path
         path = pyastar2d.astar_path(dilated_map, np.array(start), np.array(end), allow_diagonal=True)
@@ -257,7 +265,4 @@ if __name__ == '__main__':
     rospy.init_node('aStar', anonymous=True)
 
     mapHandler = CallbackHandler()
-    main(mapHandler)
-
-
-    
+    main(mapHandler) 
