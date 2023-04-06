@@ -149,12 +149,10 @@ def main(mapHandler):
                 map2d[mask[0][i]][mask[1][i]] = 0
             # map2d = np.divide(map2d,100).astype(int)
             dilated_map = ndimage.binary_dilation(map2d,structure=radius_mask).astype(map2d.dtype).astype(np.float32)
-            print('b4 dilated_map.min: {}, max: {}\n'.format(map2d.min(),map2d.max()))
             dilated_map = (gaussian_filter(dilated_map, sigma=2)*1E24).astype(np.float32)
             mask = np.where(dilated_map < 1)
             for i in range(len(mask[0])):
                 dilated_map[mask[0][i]][mask[1][i]] = 1
-            print('dilated_map.min: {}, max: {}\n'.format(dilated_map.min(),dilated_map.max()))
             # dilated_map[dilated_map == 1] = np.inf
             # dilated_map[dilated_map == 0] = 1
             assert dilated_map.min() == 1, "cost of moving must be at least 1"
@@ -182,7 +180,6 @@ def main(mapHandler):
         path = pyastar2d.astar_path(dilated_map, np.array(start), np.array(end), allow_diagonal=True)
     
         path_data = np.zeros([mapHandler.width,mapHandler.height])
-        print(mapHandler.width)
         
         if path is not None:
             if len(path) > 1:
