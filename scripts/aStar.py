@@ -18,6 +18,7 @@ from scipy.ndimage.filters import gaussian_filter
 import numpy as np
 import matplotlib.pyplot as plt
 
+
 class Turtlebot:
     def __init__(self):
         self.odom_sub = rospy.Subscriber('/odom', Odometry, self.odom_callback)
@@ -103,6 +104,7 @@ def main(mapHandler):
     current_node = 6
     rate = rospy.Rate(10)
 
+
     #Row then column 
     # (0,1) is 0th row 1st column
   
@@ -139,6 +141,7 @@ def main(mapHandler):
         rospy.sleep(0.1)
 
     #main loop
+    T=0
     while not rospy.is_shutdown():
         # Read new map and publish dilated map
         if (mapHandler.newMap):
@@ -174,7 +177,21 @@ def main(mapHandler):
         start = world2map(mapHandler,turtle_pos[0], turtle_pos[1])
         # rospy.loginfo('bot pos in map coords: {}'.format(start))
         # end = world2map(mapHandler,1.3,2.8)
-        end = world2map(mapHandler,4,2)
+        importantpositions=[[4,1.5], #first goal
+                            [4,0.5], #second goal
+                            [1.5,0.5], #third goal
+                            [2,1.5], #4th goal
+                            [2.2,2],
+                            [4,2],
+                            [4,1.5],
+                            [3.5,1.5],
+                            [2.5,1.5]
+                            ] #5th goal   
+        X=importantpositions[T]
+        X0=X[0]
+        X1=X[1]
+        end = world2map(mapHandler,X0,X1)
+        
 
         # Compute A* path
         path = pyastar2d.astar_path(dilated_map, np.array(start), np.array(end), allow_diagonal=True)
@@ -249,7 +266,13 @@ def main(mapHandler):
                 turn_cmd.angular.z = 0.0
                 turtle_bot.cmd_pub.publish(turn_cmd)
                 rospy.loginfo(f"\n destination reached!")
-                break
+                T= T+1
+                print(T)
+                if T==9 :
+                    rospy.loginfo(f"\n final destination reached!")
+                    break
+ 
+                #break
     
         turtle_bot.cmd_pub.publish(turn_cmd)    
 
