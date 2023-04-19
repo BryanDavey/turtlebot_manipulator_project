@@ -52,10 +52,10 @@ class CallbackHandler():
         self.cameraExtrinsics = transform_mx
         br = CvBridge()
         full_size = br.imgmsg_to_cv2(data, desired_encoding='bgr8')
-        self.cx = int(full_size.shape[0]/8)
-        self.cy = int(full_size.shape[1]/8)
+        self.cx = int(full_size.shape[0]/4)
+        self.cy = int(full_size.shape[1]/4)
         # resize image
-        self.current_frame = cv.resize(full_size, (int(640/4),int(480/4)), interpolation = cv.INTER_AREA)
+        self.current_frame = cv.resize(full_size, (int(640/2),int(480/2)), interpolation = cv.INTER_AREA)
         self.new_pic = True
 
     def mapCallback(self, grid):
@@ -134,21 +134,129 @@ def processImage(handler):
     cv.imshow("camera", handler.current_frame)
     # cv.imwrite("red_square.jpg",handler.current_frame)
     cv.waitKey(1)
+
+
+
+
+    # ###################################################################################################
+def cbImageProjection(self, msg_img):
+    if self.sub_image_type == "compressed":
+        # converts compressed image to opencv image
+        np_image_original = np.frombuffer(msg_img.data, np.uint8)
+        cv_image_original = cv.imdecode(np_image_original, cv.IMREAD_COLOR)
+    elif self.sub_image_type == "raw":
+        # converts raw image to opencv image
+        cv_image_original = self.cvBridge.imgmsg_to_cv2(msg_img, "bgr8")
+
+    # setting homography variables
+    top_x = self.top_x
+    top_y = self.top_y
+    bottom_x = self.bottom_x
+    bottom_y = self.bottom_y
+
+    if self.is_calibration_mode == True:
+        # copy original image to use for cablibration
+        cv_image_calib = np.copy(cv_image_original)
+
+        # draw lines to help setting homography variables
+        cv_image_calib = cv.line(cv_image_calib, (160 - top_x, 180 - top_y), (160 + top_x, 180 - top_y), (0, 0, 255), 1)
+        cv_image_calib = cv.line(cv_image_calib, (160 - bottom_x, 120 + bottom_y), (160 + bottom_x, 120 + bottom_y), (0, 0, 255), 1)
+        cv_image_calib = cv.line(cv_image_calib, (160 + bottom_x, 120 + bottom_y), (160 + top_x, 180 - top_y), (0, 0, 255), 1)
+        cv_image_calib = cv.line(cv_image_calib, (160 - bottom_x, 120 + bottom_y), (160 - top_x, 180 - top_y), (0, 0, 255), 1)
+
+        if self.pub_image_type == "compressed":
+            # publishes calibration image in compressed type
+            self.pub_image_calib.publish(self.cvBridge.cv2_to_compressed_imgmsg(cv_image_calib, "jpg"))
+
+        elif self.pub_image_type == "raw":
+            # publishes calibration image in raw type
+            self.pub_image_calib.publish(self.cvBridge.cv2_to_imgmsg(cv_image_calib, "bgr8"))
+
+    # adding Gaussian blur to the image of original
+    cv_image_original = cv.GaussianBlur(cv_image_original, (5, 5), 0)
+
+    ## homography transform process
+    # selecting 4 points from the original image
+    pts_src = np.array([[160 - top_x, 180 - top_y], [160 + top_x, 180 - top_y], [160 + bottom_x, 120 + bottom_y], [160 - bottom_x, 120 + bottom_y]])
+
+    # selecting 4 points from image that will be transformed
+    pts_dst = np.array([[200, 0], [800, 0], [800, 600], [200, 600]])
+
+    # finding homography matrix
+    h, status = cv.findHomography(pts_src, pts_dst)
+
+    # homography process
+    cv_image_homography = cv.warpPerspective(cv_image_original, h, (1000, 600))
+
+    # fill the empty space with black triangles on left and right side of bottom
+    triangle1 = np.array([[0, 599], [0, 340], [200, 599]], np.int32)
+    triangle2 = np.array([[999, 599], [999, 340], [799, 599]], np.int32)
+    black = (0, 0, 0)
+    white = (255, 255, 255)
+    cv_image_homography = cv.fillPoly(cv_image_homography, [triangle1, triangle2], black)
+
+    if self.pub_image_type == "compressed":
+        # publishes ground-project image in compressed type
+        self.pub_image_projected.publish(self.cvBridge.cv2_to_compressed_imgmsg(cv_image_homography, "jpg"))
+
+    elif self.pub_image_type == "raw":
+        # publishes ground-project image in raw type
+        self.pub_image_projected.publish(self.cvBridge.cv2_to_imgmsg(cv_image_homography, "bgr8"))
+    # ###################################################################################################
+
+def reproject_image(handler,h):
+    cv_image_original = handler.current_frame
+    # adding Gaussian blur to the image of original
+    cv_image_original = cv.GaussianBlur(cv_image_original, (5, 5), 0)
+
+    # homography process
+    cv_image_homography = cv.warpPerspective(cv_image_original, h, (1000, 600))
+    return cv_image_homography
     
+
+# if __name__ == '__main__':
+#     rospy.init_node('video_sub_py',anonymous=True)
+#     handler = CallbackHandler()
+#     rospy.Subscriber('/camera/rgb/image_raw',Image,handler.imageCallback)
+
+#     input_pts = np.float32([[317,152], [234, 133], [87,133], [0,151]])
+#     output_pts = np.float32([[0.482, 0.7982],[-0.5172, 0.8183],[-0.4881, 1.8147],[0.5110, 1.7884]])
+#     handler.im_2_cam_transform_xz = cv.getPerspectiveTransform(input_pts,output_pts)
+#     # y is 0.1 always
+    
+#     while(not handler.new_pic or handler.height == None):
+#         # Wait until first map has been published
+#         print('waiting')
+#         rospy.sleep(0.1)
+#     handler.map_data = np.zeros([handler.width,handler.height],int)
+#     print('new_pic found')
+#     #main loop
+#     while not rospy.is_shutdown():
+#         if (handler.new_pic):
+#             handler.new_pic = False
+#             processImage(handler)
+
+#     cv.destroyAllWindows()
+
 
 if __name__ == '__main__':
     rospy.init_node('video_sub_py',anonymous=True)
     handler = CallbackHandler()
     rospy.Subscriber('/camera/rgb/image_raw',Image,handler.imageCallback)
+    top_x = 72
+    top_y = 4
+    bottom_x = 115
+    bottom_y = 120
+    ## homography transform process
+    # selecting 4 points from the original image
+    pts_src = np.array([[160 - top_x, 180 - top_y], [160 + top_x, 180 - top_y], [160 + bottom_x, 120 + bottom_y], [160 - bottom_x, 120 + bottom_y]])
 
-    input_pts = np.float32([[317,152], [234, 133], [87,133], [0,151]])
-    output_pts = np.float32([[0.482, 0.7982],[-0.5172, 0.8183],[-0.4881, 1.8147],[0.5110, 1.7884]])
-    handler.im_2_cam_transform_xz = cv.getPerspectiveTransform(input_pts,output_pts)
-    # y is 0.1 always
-    for i in handler.im_2_cam_transform_xz:
-        pt = i/i[2]
-        print(pt)
-    
+    # selecting 4 points from image that will be transformed
+    pts_dst = np.array([[200, 0], [800, 0], [800, 600], [200, 600]])
+
+    # finding homography matrix
+    h, status = cv.findHomography(pts_src, pts_dst)
+
     while(not handler.new_pic or handler.height == None):
         # Wait until first map has been published
         print('waiting')
@@ -157,9 +265,14 @@ if __name__ == '__main__':
     print('new_pic found')
     #main loop
     while not rospy.is_shutdown():
-        break
         if (handler.new_pic):
             handler.new_pic = False
-            processImage(handler)
+            projected_image = reproject_image(handler,h)
+            cv.imshow(window_detection_name,handler.current_frame)
+            cv.imshow('camera',projected_image)
+            cv.waitKey(1)
+
 
     cv.destroyAllWindows()
+
+    
